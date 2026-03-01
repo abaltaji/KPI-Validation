@@ -1,16 +1,92 @@
-"""This module contains the function's business logic.
+"""Module for Speckle Automate KPI validation.
 
-Use the automation_context module to wrap your function in an Automate context helper.
+Authentication module for Speckle - provides a reusable get_client() function.
 """
 
+import os
+from collections import defaultdict
+from typing import Any
+
+from dotenv import load_dotenv
+from openpyxl import Workbook
 from pydantic import Field, SecretStr
 from speckle_automate import (
     AutomateBase,
     AutomationContext,
     execute_automate_function,
 )
+from specklepy.api.client import SpeckleClient
 
 from flatten import flatten_base
+
+
+def get_client() -> SpeckleClient:
+    """
+    Authenticate and return a SpeckleClient instance.
+    
+    Requires SPECKLE_TOKEN in environment or .env file.
+    Optionally set SPECKLE_SERVER (defaults to app.speckle.systems).
+    """
+    # Load environment variables from a local .env file, if present
+    load_dotenv()
+
+    # Get token and server host from environment
+    token = os.environ.get("SPECKLE_TOKEN")
+    server_host = os.environ.get("SPECKLE_SERVER", "app.speckle.systems")
+
+    if not token:
+        raise ValueError("Set SPECKLE_TOKEN in your .env file and re-run.")
+
+    # Authenticate
+    client = SpeckleClient(host=server_host)
+    client.authenticate_with_token(token)
+
+    return client
+
+
+def upload_file_to_speckle(
+    client: SpeckleClient, project_id: str, file_path: str, file_name: str
+) -> str:
+    """Upload a file to Speckle using the REST API."""
+    import requests
+    
+    # Get the token from environment (same one client uses)
+    token = os.environ.get("SPECKLE_TOKEN")
+    if not token:
+        raise ValueError("SPECKLE_TOKEN not found in environment")
+    
+    # Prepare the file upload request
+    url = f"{client.url}/api/file/create"
+    
+    with open(file_path, "rb") as f:
+        files = {"files": (file_name, f)}
+        params = {"streamId": project_id}
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        response = requests.post(url, files=files, params=params, headers=headers)
+        response.raise_for_status()
+        
+        result = response.json()
+        # File upload returns a list of file IDs
+        file_id = result.get("fileIds", [None])[0]
+        
+        if not file_id:
+            raise ValueError("No file ID returned from upload")
+        
+        return file_id
+
+
+def post_comment_with_file(
+    client: SpeckleClient, model_id: str, project_id: str, file_id: str, file_name: str
+) -> None:
+    """Post a comment on the model with the uploaded file."""
+    comment_text = f"📊 KPI Validation Report: {file_name}"
+    client.comment.create(
+        stream_id=project_id,
+        object_id=model_id,
+        text=comment_text,
+        resources=[{"resourceType": "file", "resourceId": file_id}],
+    )
 
 
 class FunctionInputs(AutomateBase):
@@ -32,72 +108,231 @@ class FunctionInputs(AutomateBase):
     )
 
 
+def _get_attr(obj: Any, *names: str, default=None):
+    """Safely get first available attribute/key from object or dict."""
+    for name in names:
+        if isinstance(obj, dict) and name in obj:
+            return obj[name]
+        if hasattr(obj, name):
+            return getattr(obj, name)
+    return default
+
+
+def extract_capsule_areas(model: Any) -> list[dict]:
+    """Extract area rows from a Speckle model."""
+    rows: list[dict] = []
+    for item in flatten_base(model):
+        area = _get_attr(item, "area", "Area", default=None)
+        if area is None:
+            continue
+
+        try:
+            area_value = float(area)
+        except (TypeError, ValueError):
+            continue
+
+        rows.append(
+            {
+                "tower": _get_attr(item, "tower", "Tower", default="Unknown"),
+                "level": _get_attr(item, "level", "Level", default="Unspecified"),
+                "capsule": _get_attr(
+                    item, "capsule", "capsule_no", "CapsuleNo", default=""
+                ),
+                "program": _get_attr(item, "program", "Program", default="Unspecified"),
+                "location": _get_attr(item, "location", "Location", default=""),
+                "area": area_value,
+            }
+        )
+    return rows
+
+
+def handler(context: Any) -> dict:
+    """Main handler function for Speckle Automate."""
+    model = _get_attr(
+        _get_attr(_get_attr(context, "automationContext"), "commit"),
+        "referencedObject",
+        default=None,
+    )
+    if model is None:
+        raise ValueError("No referencedObject found.")
+
+    rows = extract_capsule_areas(model)
+    if not rows:
+        return {"message": "No 2D area data found."}
+
+    workbook = Workbook()
+
+    # =========================
+    # SHEET 1: RAW DATA
+    # =========================
+    raw_sheet = workbook.active
+    raw_sheet.title = "Capsule Areas"
+
+    headers = ["Tower", "Level", "Capsule No.", "Program", "Location", "2D Area (m2)"]
+    raw_sheet.append(headers)
+
+    for r in rows:
+        raw_sheet.append(
+            [r["tower"], r["level"], r["capsule"], r["program"], r["location"], r["area"]]
+        )
+
+    # =========================
+    # DATA AGGREGATION
+    # =========================
+    total_area = sum(r["area"] for r in rows)
+
+    area_per_tower: dict[str, float] = defaultdict(float)
+    area_per_level: dict[str, float] = defaultdict(float)
+    area_per_program: dict[str, float] = defaultdict(float)
+    matrix: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    for r in rows:
+        tower = r["tower"] or "Unknown"
+        level = r["level"] or "Unspecified"
+        program = r["program"] or "Unspecified"
+
+        area_per_tower[tower] += r["area"]
+        area_per_level[level] += r["area"]
+        area_per_program[program] += r["area"]
+        matrix[level][tower] += r["area"]
+
+    # =========================
+    # SHEET 2: SUMMARY
+    # =========================
+    summary_sheet = workbook.create_sheet("Summary")
+    summary_sheet.append(["Metric", "Value"])
+    summary_sheet.append(["Total Area (m2)", total_area])
+    summary_sheet.append([])
+
+    summary_sheet.append(["Area per Tower"])
+    summary_sheet.append(["Tower", "Area (m2)"])
+    for tower, area in sorted(area_per_tower.items()):
+        summary_sheet.append([tower, area])
+    summary_sheet.append([])
+
+    summary_sheet.append(["Area per Level"])
+    summary_sheet.append(["Level", "Area (m2)"])
+    for level, area in sorted(area_per_level.items()):
+        summary_sheet.append([level, area])
+    summary_sheet.append([])
+
+    summary_sheet.append(["Area per Program"])
+    summary_sheet.append(["Program", "Area (m2)"])
+    for program, area in sorted(area_per_program.items()):
+        summary_sheet.append([program, area])
+    summary_sheet.append([])
+
+    # Tower x Level matrix
+    towers_sorted = sorted(area_per_tower.keys())
+    levels_sorted = sorted(matrix.keys())
+
+    summary_sheet.append(["Tower x Level Matrix (m2)"])
+    summary_sheet.append(["Level"] + towers_sorted)
+
+    for level in levels_sorted:
+        summary_sheet.append([level] + [matrix[level].get(t, 0.0) for t in towers_sorted])
+
+    output_path = "capsule_areas.xlsx"
+    workbook.save(output_path)
+
+    return {
+        "message": "Excel generated successfully.",
+        "output": output_path,
+        "rows": len(rows),
+    }
+
+
 def automate_function(
-    automate_context: AutomationContext,
-    function_inputs: FunctionInputs,
-) -> None:
-    """This is an example Speckle Automate function.
-
-    Args:
-        automate_context: A context-helper object that carries relevant information
-            about the runtime context of this function.
-            It gives access to the Speckle project data that triggered this run.
-            It also has convenient methods for attaching results to the Speckle model.
-        function_inputs: An instance object matching the defined schema.
-    """
-    # The context provides a convenient way to receive the triggering version.
-    version_root_object = automate_context.receive_version()
-
-    objects_with_forbidden_speckle_type = [
-        b
-        for b in flatten_base(version_root_object)
-        if b.speckle_type == function_inputs.forbidden_speckle_type
-    ]
-    count = len(objects_with_forbidden_speckle_type)
-
-    if count > 0:
-        # This is how a run is marked with a failure cause.
-        automate_context.attach_error_to_objects(
-            category="Forbidden speckle_type"
-            f" ({function_inputs.forbidden_speckle_type})",
-            affected_objects=objects_with_forbidden_speckle_type,
-            message="This project should not contain the type: "
-            f"{function_inputs.forbidden_speckle_type}",
-        )
-        automate_context.mark_run_failed(
-            "Automation failed: "
-            f"Found {count} object that have one of the forbidden speckle types: "
-            f"{function_inputs.forbidden_speckle_type}"
-        )
-
-        # Set the automation context view to the original model/version view
-        # to show the offending objects.
-        automate_context.set_context_view()
-
-    else:
-        automate_context.mark_run_success("No forbidden types found.")
-
-    # If the function generates file results, this is how it can be
-    # attached to the Speckle project/model
-    # automate_context.store_file_result("./report.pdf")
+    automation_context: AutomationContext, function_inputs: FunctionInputs
+) -> dict:
+    """Speckle Automate entry point."""
+    # Generate Excel file
+    result = handler({"automationContext": automation_context})
+    
+    # Upload to Speckle
+    try:
+        client = get_client()
+        project_id = automation_context.project_id
+        model_id = automation_context.model_id
+        
+        file_path = result["output"]
+        file_name = os.path.basename(file_path)
+        
+        # Upload file
+        file_id = upload_file_to_speckle(client, project_id, file_path, file_name)
+        
+        # Post comment with file attachment
+        post_comment_with_file(client, model_id, project_id, file_id, file_name)
+        
+        result["uploaded"] = True
+        result["file_id"] = file_id
+        print(f"✓ File uploaded to Speckle: {file_name}")
+        
+    except Exception as e:
+        print(f"⚠ Could not upload to Speckle: {e}")
+        result["uploaded"] = False
+    
+    return result
 
 
-def automate_function_without_inputs(automate_context: AutomationContext) -> None:
-    """A function example without inputs.
-
-    If your function does not need any input variables,
-     besides what the automation context provides,
-     the inputs argument can be omitted.
-    """
-    pass
-
-
-# make sure to call the function with the executor
 if __name__ == "__main__":
-    # NOTE: always pass in the automate function by its reference; do not invoke it!
-
-    # Pass in the function reference with the inputs schema to the executor.
-    execute_automate_function(automate_function, FunctionInputs)
-
-    # If the function has no arguments, the executor can handle it like so
-    # execute_automate_function(automate_function_without_inputs)
+    import sys
+    if len(sys.argv) > 1:
+        # Running with Speckle Automate arguments
+        execute_automate_function(automate_function, FunctionInputs)
+    else:
+        # Test authentication and Excel export with real model data
+        from specklepy.transports.server import ServerTransport
+        from specklepy.api import operations
+        
+        print("=== Testing Speckle Authentication ===")
+        try:
+            client = get_client()
+            user = client.active_user.get()
+            print(f"✓ Logged in as {user.name} on {client.url}")
+            
+            # Fetch model data and test Excel export
+            print("\n=== Testing Excel Export with Model Data ===")
+            PROJECT_ID = "08c875bbe4"
+            MODEL_ID = "7631638073"
+            
+            # Get model info
+            model = client.model.get(MODEL_ID, PROJECT_ID)
+            print(f"✓ Model: {model.name}")
+            
+            # Get latest version
+            versions = client.version.get_versions(MODEL_ID, PROJECT_ID, limit=1)
+            latest_version = versions.items[0]
+            print(f"  Latest version: {latest_version.id}")
+            
+            # Receive the data
+            transport = ServerTransport(client=client, stream_id=PROJECT_ID)
+            model_data = operations.receive(latest_version.referenced_object, transport)
+            
+            # Test Excel export
+            result = handler({"automationContext": {"commit": {"referencedObject": model_data}}})
+            print(f"\n✓ Excel Export Success!")
+            print(f"  Output: {result['output']}")
+            print(f"  Rows processed: {result['rows']}")
+            
+            # Test file upload to Speckle
+            print(f"\n=== Testing File Upload to Speckle ===")
+            file_path = result["output"]
+            file_name = os.path.basename(file_path)
+            
+            file_id = upload_file_to_speckle(client, PROJECT_ID, file_path, file_name)
+            print(f"✓ File uploaded!")
+            print(f"  File ID: {file_id}")
+            print(f"  File name: {file_name}")
+            
+            # Post comment with attachment
+            post_comment_with_file(client, MODEL_ID, PROJECT_ID, file_id, file_name)
+            print(f"✓ Comment posted to model with file attachment!")
+            
+        except ValueError as e:
+            print(f"✗ Authentication failed: {e}")
+            print("  Make sure SPECKLE_TOKEN is set in your .env file")
+        except Exception as e:
+            print(f"✗ Error: {e}")
+            import traceback
+            traceback.print_exc()

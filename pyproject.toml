@@ -9,7 +9,11 @@ readme = "README.md"
 license = "Apache-2.0"
 keywords = ["speckle", "automate", "bim", "aec"]
 
-dependencies = ["specklepy==3.1.0"]
+dependencies = [
+    "specklepy==3.1.0",
+    "openpyxl",
+    "dotenv>=0.9.9",
+]
 
 [project.optional-dependencies]
 dev = [
