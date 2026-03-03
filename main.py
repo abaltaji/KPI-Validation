@@ -271,40 +271,43 @@ def handler(model: Any) -> dict:
 def automate_function(
     automation_context: AutomationContext, function_inputs: FunctionInputs
 ) -> None:
-    """Speckle Automate entry point."""
+    """Speckle Automate entry point using built-in authentication."""
     
-    # INSTRUCTION: Safely receive the actual 3D model base object from the Context
+    # 1. Receive the model data from Speckle
     version_root_object = automation_context.receive_version()
     
-    # Pass the object to our data handler
+    # 2. Process the Rhino meshes to find area data
     result = handler(version_root_object)
     
-    # If no data was found, mark the run as successful but notify the user
+    # If no mesh data was found, exit gracefully
     if result.get("rows", 0) == 0:
         automation_context.mark_run_success(result["message"])
         return
     
-    # Upload to Speckle
+    # 3. Upload & Comment using the AUTOMATIC client
     try:
-        client = get_client()
-        project_id = automation_context.speckle_client.workspace_id or automation_context.project_id
-        model_id = automation_context.model_id
+        # INSTRUCTION: We use the client provided by the context, 
+        # NOT the get_client() function that requires a .env file.
+        client = automation_context.speckle_client 
+        
+        project_id = automation_context.automation_run_data.project_id
+        model_id = automation_context.automation_run_data.model_id
         
         file_path = result["output"]
         file_name = os.path.basename(file_path)
         
-        # Upload file
+        # Upload the generated Excel file
         file_id = upload_file_to_speckle(client, project_id, file_path, file_name)
         
-        # Post comment with file attachment
+        # Post the report as a comment on the model
         post_comment_with_file(client, model_id, project_id, file_id, file_name)
         
-        # INSTRUCTION: We must explicitly tell Automate that the process finished correctly
-        automation_context.mark_run_success(f"✓ File uploaded to Speckle: {file_name}")
+        # Mark the automation as a success in the dashboard
+        automation_context.mark_run_success(f"✓ KPI Report generated: {file_name}")
         
     except Exception as e:
-        # INSTRUCTION: If upload fails, tell Automate the run failed
-        automation_context.mark_run_failed(f"⚠ Could not upload to Speckle: {e}")
+        # If something goes wrong during upload, mark it as failed
+        automation_context.mark_run_failed(f"⚠ Upload failed: {e}")
 
 
 if __name__ == "__main__":
