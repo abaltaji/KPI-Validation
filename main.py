@@ -230,15 +230,14 @@ def handler(model: Any) -> dict:
 def automate_function(
     automation_context: AutomationContext, function_inputs: FunctionInputs
 ) -> None:
-    """Final robust entry point for Speckle Automate v1.1.11."""
+    """Final syntax fix for projectId and modelId attributes v1.1.11."""
     
-    # 1. Receive the model data
+    # 1. Receive the model
     version_root_object = automation_context.receive_version()
     
-    # 2. Process data using your handler
+    # 2. Process data (handler function)
     result = handler(version_root_object)
     
-    # If no mesh area data was found, exit gracefully
     if result.get("rows", 0) == 0:
         automation_context.mark_run_success(result["message"])
         return
@@ -248,28 +247,25 @@ def automate_function(
         # Use the client provided by the context
         client = automation_context.speckle_client 
         
-        # INSTRUCTION: Using the context's direct properties is the most 
-        # reliable way to get these IDs in the current SDK.
-        project_id = automation_context.project_id
-        model_id = automation_context.model_id
-        
-        # Extract the token directly from the authenticated client
+        # INSTRUCTION: Extracting IDs using camelCase as required by the SDK
+        # And extracting the token directly from the authenticated client
+        project_id = automation_context.automation_run_data.projectId
+        model_id = automation_context.automation_run_data.modelId
         token = client.account.token 
         
         file_path = result["output"]
         file_name = os.path.basename(file_path)
         
-        # Upload using the helper (passing the token manually)
+        # Upload using the helper (ensure you updated upload_file_to_speckle to accept token)
         file_id = upload_file_to_speckle(client, project_id, file_path, file_name, token)
         
-        # Post the comment with the file attachment
+        # Post the report as a comment
         post_comment_with_file(client, model_id, project_id, file_id, file_name)
         
         automation_context.mark_run_success(f"✓ KPI Report generated: {file_name}")
         
     except Exception as e:
-        # Catch any remaining issues and report them to the dashboard
-        automation_context.mark_run_failed(f"⚠ Automation failed during upload: {e}")
+        automation_context.mark_run_failed(f"⚠ Upload failed: {e}")
 
 
 if __name__ == "__main__":
