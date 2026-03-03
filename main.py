@@ -44,21 +44,19 @@ def get_client() -> SpeckleClient:
 
 
 def upload_file_to_speckle(
-    client: SpeckleClient, project_id: str, file_path: str, file_name: str
+    client: SpeckleClient, project_id: str, file_path: str, file_name: str, token: str
 ) -> str:
     """Upload a file to Speckle using the REST API."""
     import requests
     
-    token = os.environ.get("SPECKLE_TOKEN")
-    if not token:
-        raise ValueError("SPECKLE_TOKEN not found in environment")
-    
+    # INSTRUCTION: Use the 'token' argument passed to the function.
+    # Do NOT use os.environ.get here as it fails in the cloud.
     url = f"{client.url}/api/file/create"
     
     with open(file_path, "rb") as f:
         files = {"files": (file_name, f)}
         params = {"streamId": project_id}
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {"Authorization": f"Bearer {token}"} # Fixed to use the argument
         
         response = requests.post(url, files=files, params=params, headers=headers)
         response.raise_for_status()
@@ -135,45 +133,6 @@ def extract_capsule_areas(model: Any) -> list[dict]:
             }
         )
     return rows
-
-
-
-def automate_function(
-    automation_context: AutomationContext, function_inputs: FunctionInputs
-) -> None:
-    """Speckle Automate entry point."""
-    
-    # 1. Receive the model
-    version_root_object = automation_context.receive_version()
-    
-    # 2. Process data
-    result = handler(version_root_object)
-    
-    if result.get("rows", 0) == 0:
-        automation_context.mark_run_success(result["message"])
-        return
-    
-    # 3. Upload & Comment (The Fix is here!)
-    try:
-        # Use the client ALREADY attached to the context
-        client = automation_context.speckle_client 
-        
-        project_id = automation_context.automation_run_data.project_id
-        model_id = automation_context.automation_run_data.model_id
-        
-        file_path = result["output"]
-        file_name = os.path.basename(file_path)
-        
-        # Upload using the internal client
-        file_id = upload_file_to_speckle(client, project_id, file_path, file_name)
-        
-        # Post comment
-        post_comment_with_file(client, model_id, project_id, file_id, file_name)
-        
-        automation_context.mark_run_success(f"✓ KPI Report uploaded: {file_name}")
-        
-    except Exception as e:
-        automation_context.mark_run_failed(f"⚠ Upload failed: {e}")
 
 
 # INSTRUCTION: Changed the input to accept the direct Base object, not a weird context dict.
@@ -271,48 +230,45 @@ def handler(model: Any) -> dict:
 def automate_function(
     automation_context: AutomationContext, function_inputs: FunctionInputs
 ) -> None:
-    """Final robust entry point for Speckle Automate."""
+    """Final robust entry point for Speckle Automate v1.1.11."""
     
-    # 1. Receive the model data from the Speckle version
+    # 1. Receive the model data
     version_root_object = automation_context.receive_version()
     
-    # 2. Process data using your handler to generate the Excel file
+    # 2. Process data using your handler
     result = handler(version_root_object)
     
-    # If no mesh area data was found, succeed but notify the user
+    # If no mesh area data was found, exit gracefully
     if result.get("rows", 0) == 0:
         automation_context.mark_run_success(result["message"])
         return
     
-    # 3. Upload the Excel file and post a comment
+    # 3. Upload & Comment
     try:
-        # Use the pre-authenticated client provided by Automate
+        # Use the client provided by the context
         client = automation_context.speckle_client 
         
-        # INSTRUCTION: Multi-case support for SDK compatibility
-        # This checks for both camelCase and snake_case attributes
-        project_id = getattr(automation_context.automation_run_data, "project_id", 
-                     getattr(automation_context.automation_run_data, "projectId", None))
-        model_id = getattr(automation_context.automation_run_data, "model_id", 
-                   getattr(automation_context.automation_run_data, "modelId", None))
+        # INSTRUCTION: Using the context's direct properties is the most 
+        # reliable way to get these IDs in the current SDK.
+        project_id = automation_context.project_id
+        model_id = automation_context.model_id
         
-        if not project_id or not model_id:
-            raise ValueError("Could not extract Project or Model IDs from Automate context.")
+        # Extract the token directly from the authenticated client
+        token = client.account.token 
         
         file_path = result["output"]
         file_name = os.path.basename(file_path)
         
-        # Upload the file to the Speckle project
-        file_id = upload_file_to_speckle(client, project_id, file_path, file_name)
+        # Upload using the helper (passing the token manually)
+        file_id = upload_file_to_speckle(client, project_id, file_path, file_name, token)
         
-        # Attach the file to a comment on the model
+        # Post the comment with the file attachment
         post_comment_with_file(client, model_id, project_id, file_id, file_name)
         
-        # Mark as success in the Speckle dashboard
         automation_context.mark_run_success(f"✓ KPI Report generated: {file_name}")
         
     except Exception as e:
-        # If any step fails, the run is marked as FAILED with the error message
+        # Catch any remaining issues and report them to the dashboard
         automation_context.mark_run_failed(f"⚠ Automation failed during upload: {e}")
 
 
