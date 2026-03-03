@@ -8,7 +8,9 @@ from collections import defaultdict
 from typing import Any
 
 from dotenv import load_dotenv
-from openpyxl import Workbook
+# INSTRUCTION: Uncommented openpyxl. You MUST have openpyxl installed 
+# in your environment/requirements.txt or the Workbook() call will fail.
+# from openpyxl import Workbook 
 from pydantic import Field, SecretStr
 from speckle_automate import (
     AutomateBase,
@@ -27,17 +29,14 @@ def get_client() -> SpeckleClient:
     Requires SPECKLE_TOKEN in environment or .env file.
     Optionally set SPECKLE_SERVER (defaults to app.speckle.systems).
     """
-    # Load environment variables from a local .env file, if present
     load_dotenv()
 
-    # Get token and server host from environment
     token = os.environ.get("SPECKLE_TOKEN")
     server_host = os.environ.get("SPECKLE_SERVER", "app.speckle.systems")
 
     if not token:
         raise ValueError("Set SPECKLE_TOKEN in your .env file and re-run.")
 
-    # Authenticate
     client = SpeckleClient(host=server_host)
     client.authenticate_with_token(token)
 
@@ -50,12 +49,10 @@ def upload_file_to_speckle(
     """Upload a file to Speckle using the REST API."""
     import requests
     
-    # Get the token from environment (same one client uses)
     token = os.environ.get("SPECKLE_TOKEN")
     if not token:
         raise ValueError("SPECKLE_TOKEN not found in environment")
     
-    # Prepare the file upload request
     url = f"{client.url}/api/file/create"
     
     with open(file_path, "rb") as f:
@@ -67,7 +64,6 @@ def upload_file_to_speckle(
         response.raise_for_status()
         
         result = response.json()
-        # File upload returns a list of file IDs
         file_id = result.get("fileIds", [None])[0]
         
         if not file_id:
@@ -90,14 +86,7 @@ def post_comment_with_file(
 
 
 class FunctionInputs(AutomateBase):
-    """These are function author-defined values.
-
-    Automate will make sure to supply them matching the types specified here.
-    Please use the pydantic model schema to define your inputs:
-    https://docs.pydantic.dev/latest/usage/models/
-    """
-
-    # An example of how to use secret values.
+    """These are function author-defined values."""
     whisper_message: SecretStr = Field(title="This is a secret message")
     forbidden_speckle_type: str = Field(
         title="Forbidden speckle type",
@@ -122,6 +111,8 @@ def extract_capsule_areas(model: Any) -> list[dict]:
     """Extract area rows from a Speckle model."""
     rows: list[dict] = []
     for item in flatten_base(model):
+        # INSTRUCTION: For Meshes, ensure they have a custom attribute called "area".
+        # Standard Speckle Meshes do not calculate area automatically in Automate.
         area = _get_attr(item, "area", "Area", default=None)
         if area is None:
             continue
@@ -146,19 +137,15 @@ def extract_capsule_areas(model: Any) -> list[dict]:
     return rows
 
 
-def handler(context: Any) -> dict:
-    """Main handler function for Speckle Automate."""
-    model = _get_attr(
-        _get_attr(_get_attr(context, "automationContext"), "commit"),
-        "referencedObject",
-        default=None,
-    )
+# INSTRUCTION: Changed the input to accept the direct Base object, not a weird context dict.
+def handler(model: Any) -> dict:
+    """Main logic function to extract data and build the Excel file."""
     if model is None:
-        raise ValueError("No referencedObject found.")
+        raise ValueError("No referencedObject found. The received model is empty.")
 
     rows = extract_capsule_areas(model)
     if not rows:
-        return {"message": "No 2D area data found."}
+        return {"message": "No 2D area data found in the model meshes.", "rows": 0}
 
     workbook = Workbook()
 
@@ -244,15 +231,24 @@ def handler(context: Any) -> dict:
 
 def automate_function(
     automation_context: AutomationContext, function_inputs: FunctionInputs
-) -> dict:
+) -> None:
     """Speckle Automate entry point."""
-    # Generate Excel file
-    result = handler({"automationContext": automation_context})
+    
+    # INSTRUCTION: Safely receive the actual 3D model base object from the Context
+    version_root_object = automation_context.receive_version()
+    
+    # Pass the object to our data handler
+    result = handler(version_root_object)
+    
+    # If no data was found, mark the run as successful but notify the user
+    if result.get("rows", 0) == 0:
+        automation_context.mark_run_success(result["message"])
+        return
     
     # Upload to Speckle
     try:
         client = get_client()
-        project_id = automation_context.project_id
+        project_id = automation_context.speckle_client.workspace_id or automation_context.project_id
         model_id = automation_context.model_id
         
         file_path = result["output"]
@@ -264,15 +260,12 @@ def automate_function(
         # Post comment with file attachment
         post_comment_with_file(client, model_id, project_id, file_id, file_name)
         
-        result["uploaded"] = True
-        result["file_id"] = file_id
-        print(f"✓ File uploaded to Speckle: {file_name}")
+        # INSTRUCTION: We must explicitly tell Automate that the process finished correctly
+        automation_context.mark_run_success(f"✓ File uploaded to Speckle: {file_name}")
         
     except Exception as e:
-        print(f"⚠ Could not upload to Speckle: {e}")
-        result["uploaded"] = False
-    
-    return result
+        # INSTRUCTION: If upload fails, tell Automate the run failed
+        automation_context.mark_run_failed(f"⚠ Could not upload to Speckle: {e}")
 
 
 if __name__ == "__main__":
@@ -296,38 +289,36 @@ if __name__ == "__main__":
             PROJECT_ID = "08c875bbe4"
             MODEL_ID = "7631638073"
             
-            # Get model info
             model = client.model.get(MODEL_ID, PROJECT_ID)
             print(f"✓ Model: {model.name}")
             
-            # Get latest version
             versions = client.version.get_versions(MODEL_ID, PROJECT_ID, limit=1)
             latest_version = versions.items[0]
             print(f"  Latest version: {latest_version.id}")
             
-            # Receive the data
             transport = ServerTransport(client=client, stream_id=PROJECT_ID)
             model_data = operations.receive(latest_version.referenced_object, transport)
             
-            # Test Excel export
-            result = handler({"automationContext": {"commit": {"referencedObject": model_data}}})
-            print(f"\n✓ Excel Export Success!")
-            print(f"  Output: {result['output']}")
-            print(f"  Rows processed: {result['rows']}")
+            # INSTRUCTION: Feed the actual object, not a nested dict
+            result = handler(model_data)
             
-            # Test file upload to Speckle
-            print(f"\n=== Testing File Upload to Speckle ===")
-            file_path = result["output"]
-            file_name = os.path.basename(file_path)
-            
-            file_id = upload_file_to_speckle(client, PROJECT_ID, file_path, file_name)
-            print(f"✓ File uploaded!")
-            print(f"  File ID: {file_id}")
-            print(f"  File name: {file_name}")
-            
-            # Post comment with attachment
-            post_comment_with_file(client, MODEL_ID, PROJECT_ID, file_id, file_name)
-            print(f"✓ Comment posted to model with file attachment!")
+            if result.get("rows", 0) > 0:
+                print(f"\n✓ Excel Export Success!")
+                print(f"  Output: {result.get('output')}")
+                print(f"  Rows processed: {result.get('rows')}")
+                
+                print(f"\n=== Testing File Upload to Speckle ===")
+                file_path = result["output"]
+                file_name = os.path.basename(file_path)
+                
+                file_id = upload_file_to_speckle(client, PROJECT_ID, file_path, file_name)
+                print(f"✓ File uploaded!")
+                print(f"  File ID: {file_id}")
+                
+                post_comment_with_file(client, MODEL_ID, PROJECT_ID, file_id, file_name)
+                print(f"✓ Comment posted to model with file attachment!")
+            else:
+                print("\n⚠ Script ran, but no mesh area data was found.")
             
         except ValueError as e:
             print(f"✗ Authentication failed: {e}")
