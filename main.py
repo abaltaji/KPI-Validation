@@ -230,33 +230,43 @@ def handler(model: Any) -> dict:
 def automate_function(
     automation_context: AutomationContext, function_inputs: FunctionInputs
 ) -> None:
-    """Final syntax fix for projectId and modelId attributes v1.1.11."""
+    """Final syntax fix for v1.1.11 with robust ID fallback."""
     
-    # 1. Receive the model
+    # 1. Receive the model version data
     version_root_object = automation_context.receive_version()
     
-    # 2. Process data (handler function)
+    # 2. Process mesh area data
     result = handler(version_root_object)
     
+    # If no data found, succeed gracefully
     if result.get("rows", 0) == 0:
         automation_context.mark_run_success(result["message"])
         return
     
     # 3. Upload & Comment
     try:
-        # Use the client provided by the context
         client = automation_context.speckle_client 
-        
-        # INSTRUCTION: Extracting IDs using camelCase as required by the SDK
-        # And extracting the token directly from the authenticated client
-        project_id = automation_context.automation_run_data.projectId
-        model_id = automation_context.automation_run_data.modelId
         token = client.account.token 
+        
+        # INSTRUCTION: We check the automation_run_data object for 
+        # both camelCase and snake_case versions of the IDs.
+        run_data = automation_context.automation_run_data
+        
+        project_id = getattr(run_data, "project_id", getattr(run_data, "projectId", None))
+        
+        # Model IDs are usually inside the 'triggers' list payload
+        model_id = None
+        if run_data.triggers:
+             payload = run_data.triggers[0].payload
+             model_id = getattr(payload, "modelId", getattr(payload, "model_id", None))
+
+        if not project_id or not model_id:
+            raise ValueError(f"Could not extract IDs. Project: {project_id}, Model: {model_id}")
         
         file_path = result["output"]
         file_name = os.path.basename(file_path)
         
-        # Upload using the helper (ensure you updated upload_file_to_speckle to accept token)
+        # Upload the generated Excel file
         file_id = upload_file_to_speckle(client, project_id, file_path, file_name, token)
         
         # Post the report as a comment
