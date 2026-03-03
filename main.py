@@ -271,42 +271,39 @@ def handler(model: Any) -> dict:
 def automate_function(
     automation_context: AutomationContext, function_inputs: FunctionInputs
 ) -> None:
-    """Speckle Automate entry point using built-in authentication."""
+    """Final fixed entry point for Speckle Automate."""
     
-    # 1. Receive the model data from Speckle
+    # 1. Receive the model data
     version_root_object = automation_context.receive_version()
     
-    # 2. Process the Rhino meshes to find area data
+    # 2. Process mesh area data
     result = handler(version_root_object)
     
-    # If no mesh data was found, exit gracefully
     if result.get("rows", 0) == 0:
         automation_context.mark_run_success(result["message"])
         return
     
-    # 3. Upload & Comment using the AUTOMATIC client
+    # 3. Upload & Comment (The corrected logic)
     try:
-        # INSTRUCTION: We use the client provided by the context, 
-        # NOT the get_client() function that requires a .env file.
         client = automation_context.speckle_client 
         
-        project_id = automation_context.automation_run_data.project_id
-        model_id = automation_context.automation_run_data.model_id
+        # INSTRUCTION: Extracting IDs directly from the run data context
+        project_id = automation_context.automation_run_data.projectId
+        model_id = automation_context.automation_run_data.modelId
         
         file_path = result["output"]
         file_name = os.path.basename(file_path)
         
-        # Upload the generated Excel file
+        # Upload using the internal client
         file_id = upload_file_to_speckle(client, project_id, file_path, file_name)
         
-        # Post the report as a comment on the model
+        # Post the comment
         post_comment_with_file(client, model_id, project_id, file_id, file_name)
         
-        # Mark the automation as a success in the dashboard
         automation_context.mark_run_success(f"✓ KPI Report generated: {file_name}")
         
     except Exception as e:
-        # If something goes wrong during upload, mark it as failed
+        # If any attribute error occurs, we catch it here
         automation_context.mark_run_failed(f"⚠ Upload failed: {e}")
 
 
