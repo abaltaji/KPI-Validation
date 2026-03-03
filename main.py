@@ -10,7 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 # INSTRUCTION: Uncommented openpyxl. You MUST have openpyxl installed 
 # in your environment/requirements.txt or the Workbook() call will fail.
-# from openpyxl import Workbook 
+from openpyxl import Workbook 
 from pydantic import Field, SecretStr
 from speckle_automate import (
     AutomateBase,
