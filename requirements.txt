@@ -1,0 +1,6 @@
+specklepy
+speckle-automate
+openpyxl
+python-dotenv
+requests
+pydantic
