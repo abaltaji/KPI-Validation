@@ -230,7 +230,7 @@ def handler(model: Any) -> dict:
 def automate_function(
     automation_context: AutomationContext, function_inputs: FunctionInputs
 ) -> None:
-    """Final syntax fix for v1.1.11 with robust ID fallback."""
+    """Simplified entry point using the official SDK file storage."""
     
     # 1. Receive the model version data
     version_root_object = automation_context.receive_version()
@@ -243,39 +243,19 @@ def automate_function(
         automation_context.mark_run_success(result["message"])
         return
     
-    # 3. Upload & Comment
+    # 3. Store the result file (The clean, official way)
     try:
-        client = automation_context.speckle_client 
-        token = client.account.token 
-        
-        # INSTRUCTION: We check the automation_run_data object for 
-        # both camelCase and snake_case versions of the IDs.
-        run_data = automation_context.automation_run_data
-        
-        project_id = getattr(run_data, "project_id", getattr(run_data, "projectId", None))
-        
-        # Model IDs are usually inside the 'triggers' list payload
-        model_id = None
-        if run_data.triggers:
-             payload = run_data.triggers[0].payload
-             model_id = getattr(payload, "modelId", getattr(payload, "model_id", None))
-
-        if not project_id or not model_id:
-            raise ValueError(f"Could not extract IDs. Project: {project_id}, Model: {model_id}")
-        
         file_path = result["output"]
         file_name = os.path.basename(file_path)
         
-        # Upload the generated Excel file
-        file_id = upload_file_to_speckle(client, project_id, file_path, file_name, token)
+        # INSTRUCTION: This single line replaces all the custom upload 
+        # and comment logic. It safely attaches the file to the run!
+        automation_context.store_file_result(file_path)
         
-        # Post the report as a comment
-        post_comment_with_file(client, model_id, project_id, file_id, file_name)
-        
-        automation_context.mark_run_success(f"✓ KPI Report generated: {file_name}")
+        automation_context.mark_run_success(f"✓ KPI Report generated and stored: {file_name}")
         
     except Exception as e:
-        automation_context.mark_run_failed(f"⚠ Upload failed: {e}")
+        automation_context.mark_run_failed(f"⚠ Failed to store file: {e}")
 
 
 if __name__ == "__main__":
