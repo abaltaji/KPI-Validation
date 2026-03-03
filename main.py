@@ -137,6 +137,45 @@ def extract_capsule_areas(model: Any) -> list[dict]:
     return rows
 
 
+
+def automate_function(
+    automation_context: AutomationContext, function_inputs: FunctionInputs
+) -> None:
+    """Speckle Automate entry point."""
+    
+    # 1. Receive the model
+    version_root_object = automation_context.receive_version()
+    
+    # 2. Process data
+    result = handler(version_root_object)
+    
+    if result.get("rows", 0) == 0:
+        automation_context.mark_run_success(result["message"])
+        return
+    
+    # 3. Upload & Comment (The Fix is here!)
+    try:
+        # Use the client ALREADY attached to the context
+        client = automation_context.speckle_client 
+        
+        project_id = automation_context.automation_run_data.project_id
+        model_id = automation_context.automation_run_data.model_id
+        
+        file_path = result["output"]
+        file_name = os.path.basename(file_path)
+        
+        # Upload using the internal client
+        file_id = upload_file_to_speckle(client, project_id, file_path, file_name)
+        
+        # Post comment
+        post_comment_with_file(client, model_id, project_id, file_id, file_name)
+        
+        automation_context.mark_run_success(f"✓ KPI Report uploaded: {file_name}")
+        
+    except Exception as e:
+        automation_context.mark_run_failed(f"⚠ Upload failed: {e}")
+
+
 # INSTRUCTION: Changed the input to accept the direct Base object, not a weird context dict.
 def handler(model: Any) -> dict:
     """Main logic function to extract data and build the Excel file."""
