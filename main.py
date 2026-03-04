@@ -245,9 +245,21 @@ def update_google_sheet(
     # 2. Summary
     # Calculate aggregates (reusing logic)
     total_area = sum(r["area"] for r in rows)
+    
     area_per_tower = defaultdict(float)
+    area_per_level = defaultdict(float)
+    area_per_program = defaultdict(float)
+    matrix = defaultdict(lambda: defaultdict(float))
+
     for r in rows:
-        area_per_tower[r["tower"] or "Unknown"] += r["area"]
+        tower = r["tower"] or "Unknown"
+        level = r["level"] or "Unspecified"
+        program = r["program"] or "Unspecified"
+
+        area_per_tower[tower] += r["area"]
+        area_per_level[level] += r["area"]
+        area_per_program[program] += r["area"]
+        matrix[level][tower] += r["area"]
 
     try:
         ws_summary = sh.worksheet("Summary")
@@ -264,8 +276,36 @@ def update_google_sheet(
     ]
     for tower, area in sorted(area_per_tower.items()):
         summary_data.append([tower, area])
+    
+    summary_data.append([])
+    summary_data.append(["Area per Level"])
+    summary_data.append(["Level", "Area (m2)"])
+    for level, area in sorted(area_per_level.items()):
+        summary_data.append([level, area])
 
-    ws_summary.update(summary_data)
+    summary_data.append([])
+    summary_data.append(["Area per Program"])
+    summary_data.append(["Program", "Area (m2)"])
+    for program, area in sorted(area_per_program.items()):
+        summary_data.append([program, area])
+
+    # Matrix Tower x Level
+    summary_data.append([])
+    summary_data.append(["Tower x Level Matrix (m2)"])
+    
+    towers_sorted = sorted(area_per_tower.keys())
+    levels_sorted = sorted(matrix.keys())
+    
+    # Header row for matrix
+    summary_data.append(["Level"] + towers_sorted)
+    
+    # Data rows for matrix
+    for level in levels_sorted:
+        row = [level] + [matrix[level].get(t, 0.0) for t in towers_sorted]
+        summary_data.append(row)
+
+    # Use named argument 'values' for compatibility with newer gspread versions
+    ws_summary.update(values=summary_data)
 
     return sh.url
 
