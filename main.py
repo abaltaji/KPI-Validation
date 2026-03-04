@@ -5,6 +5,7 @@ Authentication module for Speckle - provides a reusable get_client() function.
 
 import os
 import json
+import traceback
 from json import JSONDecodeError
 from collections import defaultdict
 from typing import Any
@@ -224,6 +225,12 @@ def update_google_sheet(
             json_str = json_str[1:-1]
 
         creds_dict = json.loads(json_str)
+        
+        if not isinstance(creds_dict, dict):
+            raise ValueError("The provided JSON is not a dictionary. Please paste the full content of the JSON file.")
+        if "private_key" not in creds_dict or "client_email" not in creds_dict:
+            raise ValueError("The JSON key is missing required fields ('private_key' or 'client_email').")
+            
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
@@ -238,7 +245,9 @@ def update_google_sheet(
             f"Error details: {e}"
         )
     except Exception as e:
-        raise ValueError(f"Google Sheets Authentication failed: {e}")
+        print("Detailed error traceback:")
+        traceback.print_exc()
+        raise ValueError(f"Google Sheets Error ({type(e).__name__}): {e}")
 
     # 1. Raw Data
     try:
