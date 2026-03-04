@@ -5,6 +5,7 @@ Authentication module for Speckle - provides a reusable get_client() function.
 
 import os
 import json
+from json import JSONDecodeError
 from collections import defaultdict
 from typing import Any
 
@@ -217,7 +218,12 @@ def update_google_sheet(
 
     # Authenticate
     try:
-        creds_dict = json.loads(service_account_json)
+        # Clean input: remove whitespace and potential wrapping quotes
+        json_str = service_account_json.strip()
+        if json_str.startswith("'") and json_str.endswith("'"):
+            json_str = json_str[1:-1]
+
+        creds_dict = json.loads(json_str)
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
@@ -225,6 +231,12 @@ def update_google_sheet(
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
         sh = client.open_by_key(sheet_id)
+    except JSONDecodeError as e:
+        raise ValueError(
+            f"Invalid JSON format in Service Account Key. "
+            f"It seems the key is truncated or has a syntax error. "
+            f"Error details: {e}"
+        )
     except Exception as e:
         raise ValueError(f"Google Sheets Authentication failed: {e}")
 
