@@ -4,6 +4,7 @@ Authentication module for Speckle - provides a reusable get_client() function.
 """
 
 import os
+import json
 from collections import defaultdict
 from typing import Any
 
@@ -11,6 +12,9 @@ from dotenv import load_dotenv
 # INSTRUCTION: Uncommented openpyxl. You MUST have openpyxl installed 
 # in your environment/requirements.txt or the Workbook() call will fail.
 from openpyxl import Workbook 
+# INSTRUCTION: You MUST have 'gspread' and 'google-auth' installed.
+import gspread
+from google.oauth2.service_account import Credentials
 from speckle_automate import (
     AutomationContext,
     execute_automate_function,
@@ -18,7 +22,7 @@ from speckle_automate import (
 from specklepy.api.client import SpeckleClient
 
 from flatten import flatten_base
-from function_inputs import FunctionInputs
+from function_inputs import FunctionInputs, OutputFormat
 
 
 def get_client() -> SpeckleClient:
@@ -122,16 +126,8 @@ def extract_capsule_areas(model: Any) -> list[dict]:
     return rows
 
 
-# INSTRUCTION: Changed the input to accept the direct Base object, not a weird context dict.
-def handler(model: Any) -> dict:
-    """Main logic function to extract data and build the Excel file."""
-    if model is None:
-        raise ValueError("No referencedObject found. The received model is empty.")
-
-    rows = extract_capsule_areas(model)
-    if not rows:
-        return {"message": "No 2D area data found in the model meshes.", "rows": 0}
-
+def generate_excel(rows: list[dict]) -> str:
+    """Generate an Excel file from the rows."""
     workbook = Workbook()
 
     # =========================
@@ -207,11 +203,71 @@ def handler(model: Any) -> dict:
     output_path = "capsule_areas.xlsx"
     workbook.save(output_path)
 
-    return {
-        "message": "Excel generated successfully.",
-        "output": output_path,
-        "rows": len(rows),
-    }
+    return output_path
+
+
+def update_google_sheet(
+    rows: list[dict], sheet_id: str, service_account_json: str
+) -> str:
+    """Update a Google Sheet with the rows and summary."""
+    if not sheet_id:
+        raise ValueError("Google Sheet ID is required for this format.")
+    if not service_account_json:
+        raise ValueError("Service Account JSON is required for this format.")
+
+    # Authenticate
+    try:
+        creds_dict = json.loads(service_account_json)
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        sh = client.open_by_key(sheet_id)
+    except Exception as e:
+        raise ValueError(f"Google Sheets Authentication failed: {e}")
+
+    # 1. Raw Data
+    try:
+        ws_raw = sh.worksheet("Capsule Areas")
+        ws_raw.clear()
+    except gspread.WorksheetNotFound:
+        ws_raw = sh.add_worksheet(title="Capsule Areas", rows=1000, cols=20)
+
+    headers = ["Tower", "Level", "Capsule No.", "Program", "Location", "2D Area (m2)"]
+    data_values = [headers] + [
+        [r["tower"], r["level"], r["capsule"], r["program"], r["location"], r["area"]]
+        for r in rows
+    ]
+    ws_raw.update(data_values)
+
+    # 2. Summary
+    # Calculate aggregates (reusing logic)
+    total_area = sum(r["area"] for r in rows)
+    area_per_tower = defaultdict(float)
+    for r in rows:
+        area_per_tower[r["tower"] or "Unknown"] += r["area"]
+
+    try:
+        ws_summary = sh.worksheet("Summary")
+        ws_summary.clear()
+    except gspread.WorksheetNotFound:
+        ws_summary = sh.add_worksheet(title="Summary", rows=100, cols=10)
+
+    summary_data = [
+        ["Metric", "Value"],
+        ["Total Area (m2)", total_area],
+        [],
+        ["Area per Tower"],
+        ["Tower", "Area (m2)"],
+    ]
+    for tower, area in sorted(area_per_tower.items()):
+        summary_data.append([tower, area])
+
+    ws_summary.update(summary_data)
+
+    return sh.url
 
 
 def automate_function(
@@ -222,27 +278,35 @@ def automate_function(
     # 1. Receive the model version data
     version_root_object = automation_context.receive_version()
     
-    # 2. Process mesh area data
-    result = handler(version_root_object)
-    
-    # If no data found, succeed gracefully
-    if result.get("rows", 0) == 0:
-        automation_context.mark_run_success(result["message"])
+    if not version_root_object:
+        automation_context.mark_run_failed("No model data received.")
         return
     
-    # 3. Store the result file (The clean, official way)
+    # 2. Extract Data
+    rows = extract_capsule_areas(version_root_object)
+    
+    if not rows:
+        automation_context.mark_run_success("No 2D area data found in the model meshes.")
+        return
+
+    # 3. Process based on Output Format
     try:
-        file_path = result["output"]
-        file_name = os.path.basename(file_path)
-        
-        # INSTRUCTION: This single line replaces all the custom upload 
-        # and comment logic. It safely attaches the file to the run!
-        automation_context.store_file_result(file_path)
-        
-        automation_context.mark_run_success(f"✓ KPI Report generated and stored: {file_name}")
+        if function_inputs.output_format == OutputFormat.GOOGLE_SHEET:
+            sheet_url = update_google_sheet(
+                rows,
+                function_inputs.google_sheet_id,
+                function_inputs.google_service_account_json.get_secret_value(),
+            )
+            automation_context.mark_run_success(f"✓ Google Sheet updated: {sheet_url}")
+
+        else:
+            # Default to Excel
+            file_path = generate_excel(rows)
+            automation_context.store_file_result(file_path)
+            automation_context.mark_run_success("✓ Excel Report generated and stored.")
         
     except Exception as e:
-        automation_context.mark_run_failed(f"⚠ Failed to store file: {e}")
+        automation_context.mark_run_failed(f"⚠ Processing failed: {e}")
 
 
 if __name__ == "__main__":
@@ -276,24 +340,14 @@ if __name__ == "__main__":
             transport = ServerTransport(client=client, stream_id=PROJECT_ID)
             model_data = operations.receive(latest_version.referenced_object, transport)
             
-            # INSTRUCTION: Feed the actual object, not a nested dict
-            result = handler(model_data)
+            # Test Extraction
+            rows = extract_capsule_areas(model_data)
             
-            if result.get("rows", 0) > 0:
-                print(f"\n✓ Excel Export Success!")
-                print(f"  Output: {result.get('output')}")
-                print(f"  Rows processed: {result.get('rows')}")
-                
-                print(f"\n=== Testing File Upload to Speckle ===")
-                file_path = result["output"]
-                file_name = os.path.basename(file_path)
-                
-                file_id = upload_file_to_speckle(client, PROJECT_ID, file_path, file_name)
-                print(f"✓ File uploaded!")
-                print(f"  File ID: {file_id}")
-                
-                post_comment_with_file(client, MODEL_ID, PROJECT_ID, file_id, file_name)
-                print(f"✓ Comment posted to model with file attachment!")
+            if rows:
+                print(f"\n✓ Found {len(rows)} rows.")
+                # Test Excel Generation locally
+                output = generate_excel(rows)
+                print(f"  Excel generated: {output}")
             else:
                 print("\n⚠ Script ran, but no mesh area data was found.")
             

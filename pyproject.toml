@@ -13,6 +13,8 @@ dependencies = [
     "specklepy==3.1.0",
     "openpyxl",
     "dotenv>=0.9.9",
+    "gspread",
+    "google-auth",
 ]
 
 [project.optional-dependencies]
