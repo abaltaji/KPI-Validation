@@ -11,15 +11,14 @@ from dotenv import load_dotenv
 # INSTRUCTION: Uncommented openpyxl. You MUST have openpyxl installed 
 # in your environment/requirements.txt or the Workbook() call will fail.
 from openpyxl import Workbook 
-from pydantic import Field, SecretStr
 from speckle_automate import (
-    AutomateBase,
     AutomationContext,
     execute_automate_function,
 )
 from specklepy.api.client import SpeckleClient
 
 from flatten import flatten_base
+from function_inputs import FunctionInputs
 
 
 def get_client() -> SpeckleClient:
@@ -80,18 +79,6 @@ def post_comment_with_file(
         object_id=model_id,
         text=comment_text,
         resources=[{"resourceType": "file", "resourceId": file_id}],
-    )
-
-
-class FunctionInputs(AutomateBase):
-    """These are function author-defined values."""
-    whisper_message: SecretStr = Field(title="This is a secret message")
-    forbidden_speckle_type: str = Field(
-        title="Forbidden speckle type",
-        description=(
-            "If a object has the following speckle_type,"
-            " it will be marked with an error."
-        ),
     )
 
 

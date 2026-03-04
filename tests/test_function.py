@@ -1,6 +1,5 @@
 """Run integration tests with a speckle server."""
 
-from pydantic import SecretStr
 from speckle_automate import (
     AutomationContext,
     AutomationRunData,
@@ -9,7 +8,8 @@ from speckle_automate import (
 )
 from speckle_automate.fixtures import *  # noqa: F403
 
-from main import FunctionInputs, automate_function
+from function_inputs import FunctionInputs
+from main import automate_function
 
 
 def test_function_run(
@@ -22,10 +22,7 @@ def test_function_run(
     automate_sdk = run_function(
         automation_context,
         automate_function,
-        FunctionInputs(
-            forbidden_speckle_type="None",
-            whisper_message=SecretStr("testing automatically"),
-        ),
+        FunctionInputs(),
     )
 
     assert automate_sdk.run_status == AutomationStatus.SUCCEEDED
