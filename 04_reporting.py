@@ -35,8 +35,8 @@ def generate_excel(rows: list[dict]) -> str:
         "PRG_PAR_Area",
         "PRG_PAR_UseRatio",
         "PRG_PAR_GeometryWeight",
-        "PRG_PAR_DependenciesDistance",
-        "PRG_PAR_IdealDependenciesDistance",
+        "PRG_PAR_MeanDistToExit",
+        "PRG_PAR_IdealDistToExit",
     ]
     raw_sheet.append(headers)
 
@@ -50,38 +50,42 @@ def generate_excel(rows: list[dict]) -> str:
         cell.alignment = Alignment(horizontal="center")
 
     # Aggregate data by program
-    aggregated_data = defaultdict(float)
+    aggregated_data = defaultdict(lambda: defaultdict(float))
     for r in rows:
         program = r.get("program")
         # Filter: Only include elements that actually have a program value (not "Unspecified")
         if not program or program == "Unspecified":
             continue
 
-        area = r.get("area", 0.0)
-        aggregated_data[program] += area
+        aggregated_data[program]["count"] += 1
+        aggregated_data[program]["area"] += r.get("area", 0.0)
+        aggregated_data[program]["use_ratio"] = r.get("use_ratio", 0.0)
+        aggregated_data[program]["geometry_weight"] += r.get("geometry_weight", 0.0)
+        aggregated_data[program]["mean_dist_to_exit"] += r.get("mean_dist_to_exit", 0.0)
+        aggregated_data[program]["ideal_dist_to_exit"] = r.get("ideal_dist_to_exit", 0.0)
 
     # Calculate Grand Totals
-    grand_total_area = 0.0
-    grand_total_use_ratio = 0.0
-    grand_total_geometry_weight = 0.0
+    grand_totals = defaultdict(float)
 
-    for program, total_area in sorted(aggregated_data.items()):
-        grand_total_area += total_area
-        # Placeholder additions (currently 0.0, but ready for future data)
-        grand_total_use_ratio += 0.0
-        grand_total_geometry_weight += 0.0
+    for program, data in sorted(aggregated_data.items()):
+        grand_totals["area"] += data["area"]
+        grand_totals["geometry_weight"] += data["geometry_weight"]
+
+        # Calculate Average for MeanDistToExit
+        count = data["count"] if data["count"] > 0 else 1
+        avg_mean_dist = data["mean_dist_to_exit"] / count
 
         raw_sheet.append([
             program,        # space_name
-            total_area,     # PRG_PAR_Area
-            0.0,            # PRG_PAR_UseRatio (Placeholder)
-            0.0,            # PRG_PAR_GeometryWeight (Placeholder)
-            0.0,            # PRG_PAR_DependenciesDistance (Placeholder)
-            0.0             # PRG_PAR_IdealDependenciesDistance (Placeholder)
+            data["area"],
+            data["use_ratio"],
+            data["geometry_weight"],
+            avg_mean_dist,
+            data["ideal_dist_to_exit"]
         ])
 
     # Append Total Row
-    total_row = ["Total", grand_total_area, grand_total_use_ratio, grand_total_geometry_weight, "", ""]
+    total_row = ["Total", grand_totals["area"], "", grand_totals["geometry_weight"], "", ""]
     raw_sheet.append(total_row)
 
     # Style the Total Row (Bold)
@@ -230,40 +234,47 @@ def update_google_sheet(
         "PRG_PAR_Area",
         "PRG_PAR_UseRatio",
         "PRG_PAR_GeometryWeight",
-        "PRG_PAR_DependenciesDistance",
-        "PRG_PAR_IdealDependenciesDistance",
+        "PRG_PAR_MeanDistToExit",
+        "PRG_PAR_IdealDistToExit",
     ]
 
     # Aggregate data by program
-    aggregated_data = defaultdict(float)
+    aggregated_data = defaultdict(lambda: defaultdict(float))
     for r in rows:
         program = r.get("program")
         # Filter: Only include elements that actually have a program value (not "Unspecified")
         if not program or program == "Unspecified":
             continue
 
-        area = r.get("area", 0.0)
-        aggregated_data[program] += area
+        aggregated_data[program]["count"] += 1
+        aggregated_data[program]["area"] += r.get("area", 0.0)
+        aggregated_data[program]["use_ratio"] = r.get("use_ratio", 0.0)
+        aggregated_data[program]["geometry_weight"] += r.get("geometry_weight", 0.0)
+        aggregated_data[program]["mean_dist_to_exit"] += r.get("mean_dist_to_exit", 0.0)
+        aggregated_data[program]["ideal_dist_to_exit"] = r.get("ideal_dist_to_exit", 0.0)
 
     # Calculate Grand Totals
-    grand_total_area = 0.0
-    grand_total_use_ratio = 0.0
-    grand_total_geometry_weight = 0.0
-    sorted_data = sorted(aggregated_data.items())
+    grand_totals = defaultdict(float)
+    sorted_items = sorted(aggregated_data.items())
 
-    for _, total_area in sorted_data:
-        grand_total_area += total_area
-        # Placeholder additions
-        grand_total_use_ratio += 0.0
-        grand_total_geometry_weight += 0.0
+    for _, data in sorted_items:
+        grand_totals["area"] += data["area"]
+        grand_totals["geometry_weight"] += data["geometry_weight"]
 
     data_values = [headers] + [
-        [program, total_area, 0.0, 0.0, 0.0, 0.0]
-        for program, total_area in sorted_data
+        [
+            program, 
+            data["area"], 
+            data["use_ratio"], 
+            data["geometry_weight"], 
+            (data["mean_dist_to_exit"] / data["count"]) if data["count"] > 0 else 0.0, 
+            data["ideal_dist_to_exit"]
+        ]
+        for program, data in sorted_items
     ]
     
     # Append Total Row
-    data_values.append(["Total", grand_total_area, grand_total_use_ratio, grand_total_geometry_weight, "", ""])
+    data_values.append(["Total", grand_totals["area"], "", grand_totals["geometry_weight"], "", ""])
     
     ws_raw.update(values=data_values)
 
