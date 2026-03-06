@@ -4,12 +4,20 @@ from speckle_automate import AutomateBase
 
 
 class OutputFormat(Enum):
+    """Enum defining the supported output formats for the generated report."""
     EXCEL = "Excel"
     GOOGLE_SHEET = "Google Sheet"
 
 
 class FunctionInputs(AutomateBase):
-    """These are function author-defined values."""
+    """
+    User-defined inputs for the automation function.
+
+    Fields:
+    - output_format: Choice between Excel or Google Sheet.
+    - google_sheet_id: The ID of the target Google Sheet (if applicable).
+    - google_service_account_json: The JSON credentials for Google API access.
+    """
     output_format: OutputFormat = Field(
         default=OutputFormat.EXCEL,
         title="Output Format",

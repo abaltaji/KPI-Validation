@@ -1,5 +1,6 @@
 """Run integration tests with a speckle server."""
 
+import importlib
 from speckle_automate import (
     AutomationContext,
     AutomationRunData,
@@ -8,14 +9,21 @@ from speckle_automate import (
 )
 from speckle_automate.fixtures import *  # noqa: F403
 
-from function_inputs import FunctionInputs
-from main import automate_function
+inputs_module = importlib.import_module("01_inputs")
+FunctionInputs = inputs_module.FunctionInputs
+
+main_module = importlib.import_module("05_main")
+automate_function = main_module.automate_function
 
 
 def test_function_run(
     test_automation_run_data: AutomationRunData, test_automation_token: str
 ):
-    """Run an integration test for the automate function."""
+    """
+    Integration test: Runs the automate function against a real or mocked context.
+
+    Asserts that the function completes with a SUCCEEDED status.
+    """
     automation_context = AutomationContext.initialize(
         test_automation_run_data, test_automation_token
     )
