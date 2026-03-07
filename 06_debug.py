@@ -22,6 +22,10 @@ reporting_module = importlib.import_module("04_reporting")
 generate_excel = reporting_module.generate_excel
 update_google_sheet = reporting_module.update_google_sheet
 
+# Import version comparison module
+version_comparison_module = importlib.import_module("07_version_comparison")
+load_previous_data_from_file = version_comparison_module.load_previous_data_from_file
+
 
 # TODO: Replace with your project and model IDs
 PROJECT_ID = "08c875bbe4"
@@ -67,6 +71,31 @@ def main():
             # Test Excel Generation locally
             output = generate_excel(rows)
             print(f"  Excel generated: {output}")
+
+            # --- TEST VERSION COMPARISON ---
+            print("\n=== Testing Version Comparison ===")
+            try:
+                # Load the baseline we just created
+                previous_rows = load_previous_data_from_file(output)
+                print(f"✓ Loaded baseline data: {len(previous_rows)} rows")
+                
+                # Simulate a change by modifying one value
+                if rows and len(rows) > 0:
+                    # Modify the first row's area to simulate a change
+                    original_area = rows[0].get('PRG_PAR_Area', 0)
+                    rows[0]['PRG_PAR_Area'] = float(original_area) + 10 if original_area else 10
+                    print(f"✓ Modified first program area (+10 m²) for comparison")
+                
+                # Generate report with comparison
+                comparison_output = generate_excel(rows, previous_rows=previous_rows)
+                print(f"✓ Version Comparison report generated: {comparison_output}")
+                print("  Check the 'Version Comparison' sheet for highlighted changes")
+                print("  (Yellow=Modified, Green=Added, Red=Removed)")
+                
+            except Exception as e:
+                print(f"⚠ Version comparison test failed: {e}")
+                import traceback
+                traceback.print_exc()
 
             # --- TEST GOOGLE SHEETS (Uncomment to test) ---
             print("\n=== Testing Google Sheets Export ===")

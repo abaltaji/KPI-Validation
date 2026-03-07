@@ -7,10 +7,18 @@ import os
 import importlib
 
 from dotenv import load_dotenv
-from speckle_automate import (
-    AutomationContext,
-    execute_automate_function,
-)
+
+# Note: speckle_automate is only available when running on Speckle servers
+# For local development, use 06_debug.py instead
+try:
+    from speckle_automate import (
+        AutomationContext,
+        execute_automate_function,
+    )
+except ImportError:
+    AutomationContext = None
+    execute_automate_function = None
+
 from specklepy.api.client import SpeckleClient
 
 # Import modules using importlib because they start with numbers
