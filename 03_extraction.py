@@ -66,6 +66,7 @@ def extract_capsule_areas(model: Any) -> list[dict]:
 
         # Extract additional KPI parameters
         use_ratio = 0.0
+        resource_cons_ratio = 0.0
         geometry_weight = 0.0
         mean_dist_to_exit = 0.0
         ideal_dist_to_exit = 0.0
@@ -73,6 +74,7 @@ def extract_capsule_areas(model: Any) -> list[dict]:
         if props:
             try:
                 use_ratio = float(_get_attr(props, "PRG_PAR_UseRatio", default=0.0) or 0.0)
+                resource_cons_ratio = float(_get_attr(props, "PRG_PAR_ResourceConsRatio", default=0.0) or 0.0)
                 geometry_weight = float(_get_attr(props, "PRG_PAR_GeometryWeight", default=0.0) or 0.0)
                 mean_dist_to_exit = float(_get_attr(props, "PRG_PAR_MeanDistToExit", default=0.0) or 0.0)
                 ideal_dist_to_exit = float(_get_attr(props, "PRG_PAR_IdealDistToExit", default=0.0) or 0.0)
@@ -91,6 +93,7 @@ def extract_capsule_areas(model: Any) -> list[dict]:
                 "location": _get_attr(item, "location", "Location", default=""),
                 "area": area_value,
                 "use_ratio": use_ratio,
+                "resource_cons_ratio": resource_cons_ratio,
                 "geometry_weight": geometry_weight,
                 "mean_dist_to_exit": mean_dist_to_exit,
                 "ideal_dist_to_exit": ideal_dist_to_exit,

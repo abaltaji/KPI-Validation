@@ -34,6 +34,7 @@ def generate_excel(rows: list[dict]) -> str:
         "program",
         "PRG_PAR_Area",
         "PRG_PAR_UseRatio",
+        "PRG_PAR_ResourceConsRatio",
         "PRG_PAR_GeometryWeight",
         "PRG_PAR_MeanDistToExit",
         "PRG_PAR_IdealDistToExit",
@@ -60,6 +61,7 @@ def generate_excel(rows: list[dict]) -> str:
         aggregated_data[program]["count"] += 1
         aggregated_data[program]["area"] += r.get("area", 0.0)
         aggregated_data[program]["use_ratio"] = r.get("use_ratio", 0.0)
+        aggregated_data[program]["resource_cons_ratio"] = r.get("resource_cons_ratio", 0.0)
         aggregated_data[program]["geometry_weight"] += r.get("geometry_weight", 0.0)
         aggregated_data[program]["mean_dist_to_exit"] += r.get("mean_dist_to_exit", 0.0)
         aggregated_data[program]["ideal_dist_to_exit"] = r.get("ideal_dist_to_exit", 0.0)
@@ -79,18 +81,19 @@ def generate_excel(rows: list[dict]) -> str:
             program,        # space_name
             data["area"],
             data["use_ratio"],
+            data["resource_cons_ratio"],
             data["geometry_weight"],
             avg_mean_dist,
             data["ideal_dist_to_exit"]
         ])
 
     # Append Total Row
-    total_row = ["Total", grand_totals["area"], "", grand_totals["geometry_weight"], "", ""]
+    total_row = ["Total", grand_totals["area"], "", "", grand_totals["geometry_weight"], "", ""]
     raw_sheet.append(total_row)
 
     # Style the Total Row (Bold)
     last_row = raw_sheet.max_row
-    for col in range(1, 7):
+    for col in range(1, 8):
         raw_sheet.cell(row=last_row, column=col).font = Font(bold=True)
 
     # Auto-adjust column widths
@@ -233,6 +236,7 @@ def update_google_sheet(
         "program",
         "PRG_PAR_Area",
         "PRG_PAR_UseRatio",
+        "PRG_PAR_ResourceConsRatio",
         "PRG_PAR_GeometryWeight",
         "PRG_PAR_MeanDistToExit",
         "PRG_PAR_IdealDistToExit",
@@ -249,6 +253,7 @@ def update_google_sheet(
         aggregated_data[program]["count"] += 1
         aggregated_data[program]["area"] += r.get("area", 0.0)
         aggregated_data[program]["use_ratio"] = r.get("use_ratio", 0.0)
+        aggregated_data[program]["resource_cons_ratio"] = r.get("resource_cons_ratio", 0.0)
         aggregated_data[program]["geometry_weight"] += r.get("geometry_weight", 0.0)
         aggregated_data[program]["mean_dist_to_exit"] += r.get("mean_dist_to_exit", 0.0)
         aggregated_data[program]["ideal_dist_to_exit"] = r.get("ideal_dist_to_exit", 0.0)
@@ -266,6 +271,7 @@ def update_google_sheet(
             program, 
             data["area"], 
             data["use_ratio"], 
+            data["resource_cons_ratio"],
             data["geometry_weight"], 
             (data["mean_dist_to_exit"] / data["count"]) if data["count"] > 0 else 0.0, 
             data["ideal_dist_to_exit"]
@@ -274,14 +280,14 @@ def update_google_sheet(
     ]
     
     # Append Total Row
-    data_values.append(["Total", grand_totals["area"], "", grand_totals["geometry_weight"], "", ""])
+    data_values.append(["Total", grand_totals["area"], "", "", grand_totals["geometry_weight"], "", ""])
     
     ws_raw.update(values=data_values)
 
     # Format Total Row in Google Sheets (Bold)
     total_row_idx = len(data_values)
     # Apply bold formatting to the last row (A:F)
-    ws_raw.format(f"A{total_row_idx}:F{total_row_idx}", {"textFormat": {"bold": True}})
+    ws_raw.format(f"A{total_row_idx}:G{total_row_idx}", {"textFormat": {"bold": True}})
 
     # 2. Summary
     # Calculate aggregates (reusing logic from Excel generation)
