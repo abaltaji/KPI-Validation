@@ -21,6 +21,7 @@ extract_capsule_areas = extraction_module.extract_capsule_areas
 reporting_module = importlib.import_module("04_reporting")
 generate_excel = reporting_module.generate_excel
 update_google_sheet = reporting_module.update_google_sheet
+load_previous_data_from_file = reporting_module.load_previous_data_from_file
 
 
 # TODO: Replace with your project and model IDs
@@ -61,23 +62,49 @@ def main():
         
         # Test Extraction
         rows = extract_capsule_areas(model_data)
+        previous_rows = None
         
         if rows:
             print(f"\n✓ Found {len(rows)} rows.")
             # Test Excel Generation locally
             output = generate_excel(rows)
-            print(f"  Excel generated: {output}")
+            print(f"  Base Excel generated (for history): {output}")
+
+            # --- TEST VERSION COMPARISON ---
+            print("\n=== Testing Version Comparison ===")
+            try:
+                # Load the baseline we just created
+                previous_rows = load_previous_data_from_file(output)
+                print(f"✓ Loaded baseline data: {len(previous_rows)} rows")
+                
+                # Simulate a change by modifying one value
+                if rows and len(rows) > 0:
+                    # Modify the first row's area to simulate a change
+                    original_area = rows[0].get('PRG_PAR_Area', 0)
+                    rows[0]['PRG_PAR_Area'] = float(original_area) + 10 if original_area else 10
+                    print(f"✓ Modified first program area (+10 m²) for comparison")
+                
+                # Generate report with comparison
+                comparison_output = generate_excel(rows, previous_rows=previous_rows)
+                print(f"✓ Version Comparison report generated: {comparison_output}")
+                print(f"\n!!! OPEN THIS FILE TO SEE ALL SHEETS: {comparison_output} !!!")
+                print("  (Includes: Program_KPI, Summary, Version Comparison, Data Validation)\n")
+                
+            except Exception as e:
+                print(f"⚠ Version comparison test failed: {e}")
+                import traceback
+                traceback.print_exc()
 
             # --- TEST GOOGLE SHEETS (Uncomment to test) ---
             print("\n=== Testing Google Sheets Export ===")
-            SHEET_ID = "1JOzT3Kg3g9nDhjDb9Pp_-ZmR54kI5BxSrdqB1vzWaGQ"
+            SHEET_ID = "18qf3LPkSnhP0KK8EDzWJRLcRw5IzKVeZagA0DmoAcXg"
             
             # Load credentials from secure file (ignored in .gitignore)
             json_path = "service_account.json"
             if os.path.exists(json_path):
                 with open(json_path, "r", encoding="utf-8") as f:
                     json_key = f.read()
-                url = update_google_sheet(rows, SHEET_ID, json_key)
+                url = update_google_sheet(rows, SHEET_ID, json_key, previous_rows=previous_rows)
                 print(f"✓ Google Sheet updated: {url}")
             else:
                 print(f"⚠ To test Sheets, create '{json_path}' with your credentials.")
