@@ -979,6 +979,16 @@ def update_google_sheet(
     }
     bold_fmt = {"textFormat": {"bold": True}}
 
+    # Helper to construct GridRange dict manually (used in Comparison and Validation)
+    def get_grid_range(ws, start_row, end_row, start_col, end_col):
+        return {
+            "sheetId": ws.id,
+            "startRowIndex": start_row - 1,
+            "endRowIndex": end_row,
+            "startColumnIndex": start_col - 1,
+            "endColumnIndex": end_col
+        }
+
     # Normalize rows to ensure they have PRG_PAR keys for validation/comparison
     _normalize_rows(rows)
 
@@ -986,6 +996,18 @@ def update_google_sheet(
     # Select or create the worksheet for raw data
     try:
         ws_raw = sh.worksheet("Program_KPI Parameters")
+        
+        # --- NEW LOGIC: Fetch previous data from Sheet if not provided (for Automate) ---
+        if previous_rows is None:
+            try:
+                # Check if sheet has data (headers + at least 1 row)
+                if len(ws_raw.get_values("A1:A2")) > 1:
+                    previous_rows = ws_raw.get_all_records()
+                    print(f"✓ Loaded {len(previous_rows)} previous rows from existing Google Sheet.")
+            except Exception as e:
+                print(f"⚠ Could not read previous data from Sheet: {e}")
+        # -------------------------------------------------------------------------------
+
         ws_raw.clear()
     except gspread.WorksheetNotFound:
         ws_raw = sh.add_worksheet(title="Program_KPI Parameters", rows=1000, cols=20)
