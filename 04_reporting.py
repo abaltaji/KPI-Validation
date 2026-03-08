@@ -1103,6 +1103,16 @@ def update_google_sheet(
             letter = get_column_letter(row_len)
             ws_summary.format(f"A{row_idx}:{letter}{row_idx}", header_fmt)
 
+    # Helper to construct GridRange dict manually (used in Comparison and Validation)
+    def get_grid_range(ws, start_row, end_row, start_col, end_col):
+        return {
+            "sheetId": ws.id,
+            "startRowIndex": start_row - 1,
+            "endRowIndex": end_row,
+            "startColumnIndex": start_col - 1,
+            "endColumnIndex": end_col
+        }
+
     # 3. Version Comparison (if previous version exists)
     if previous_rows is not None and len(previous_rows) > 0:
         comparison_data = _compare_versions(rows, previous_rows)
@@ -1134,16 +1144,6 @@ def update_google_sheet(
         # Conditional Formatting for Status (Column E)
         # Added -> Green, Modified -> Yellow, Removed -> Red
         
-        # Helper to construct GridRange dict manually
-        def get_grid_range(ws, start_row, end_row, start_col, end_col):
-            return {
-                "sheetId": ws.id,
-                "startRowIndex": start_row - 1,
-                "endRowIndex": end_row,
-                "startColumnIndex": start_col - 1,
-                "endColumnIndex": end_col
-            }
-
         # Construct batch update requests for conditional formatting
         requests = []
         status_col_idx = 5 # Column E
